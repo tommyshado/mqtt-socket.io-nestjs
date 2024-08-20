@@ -3,12 +3,14 @@ import {
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
+  WebSocketServer
 } from '@nestjs/websockets';
-import { Socket } from 'socket.io';
+import { Socket, Server } from 'socket.io';
 import * as mqtt from 'mqtt';
 
 @WebSocketGateway({ cors: true })
 export class ChatGateway {
+  @WebSocketServer() server: Server;
   private mqttClient: mqtt.MqttClient;
 
   constructor() {
@@ -16,11 +18,20 @@ export class ChatGateway {
     
     this.mqttClient.on('connect', () => {
       console.log('Connected to MQTT broker');
+      // Then subscribe to all room topics
+      this.mqttClient.subscribe("room/#");
     });
 
     this.mqttClient.on('message', (topic, message) => {
+      const room = topic.split("/")[1]; // Assuming topic is 'room/room_name'
       // Handle incoming MQTT messages
-      console.log(`Received message on topic ${topic}: ${message.toString()}`);
+      console.log(`Received MQTT message on topic ${topic}: ${message.toString()}`);
+
+      // Broadcast the message to all clients in the room via Socket.IO
+      this.server.to(room).emit("message", {
+        room: room,
+        message: `MQTT: ${message.toString()}`,
+      });
     });
   }
 
@@ -45,14 +56,17 @@ export class ChatGateway {
   @SubscribeMessage('sendMessage')
   handleMessage(
     @MessageBody() data: { room: string; message: string },
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: Socket
   ) {
-    client.to(data.room).emit('message', {
+
+    // Broadcast the message to all clients in the room via Socket.IO
+    this.server.to(data.room).emit('message', {
       room: data.room,
       message: data.message,
+      id: client.id
     });
 
-    // Publish message to MQTT
+    // Publish message to MQTT, to be able to send the messages to Socket.IO
     this.mqttClient.publish(`room/${data.room}`, data.message);
 
     return { status: 'success', message: 'Message sent' };
