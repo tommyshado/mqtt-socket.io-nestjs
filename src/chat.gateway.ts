@@ -6,13 +6,15 @@ import {
   WebSocketServer
 } from '@nestjs/websockets';
 import { Socket, Server } from 'socket.io';
-import { MqttService } from './mqtt.service';
 
 @WebSocketGateway({ cors: true })
 export class ChatGateway {
   @WebSocketServer() server: Server;
+  constructor() {}
 
-  constructor(private mqttService: MqttService) {}
+  broadcastToRoom(room: string, message: string) {
+    this.server.to(room).emit('message', { room, message });
+  }
 
   @SubscribeMessage('joinRoom')
   handleJoinRoom(
@@ -37,17 +39,12 @@ export class ChatGateway {
     @MessageBody() data: { room: string; message: string },
     @ConnectedSocket() client: Socket
   ) {
-
     // Broadcast the message to all clients in the room via Socket.IO
     this.server.to(data.room).emit('message', {
       room: data.room,
       message: data.message,
       id: client.id
     });
-
-    // Publish message to MQTT, to be able to send the messages to Socket.IO
-    this.mqttService.publishMessage(data.room, data.message);
-
     return { status: 'success', message: 'Message sent' };
   }
 }
